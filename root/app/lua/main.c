@@ -11,8 +11,27 @@
 
 #define LUA_APP_MAX_FILE_SIZE (1024u * 1024u)
 #define LUA_REPL_BUFFER_SIZE (8u * 1024u)
+#define LUA_INTERRUPT_INSTRUCTIONS 10000
 
 static createos_ui_t lua_ui;
+
+static void interrupt_hook(lua_State* state, lua_Debug* debug)
+{
+    (void)debug;
+    if (sys_tty_take_ctrl_c())
+        luaL_error(state, "interrupted");
+}
+
+static int protected_call(lua_State* state, int arguments, int results)
+{
+    int status;
+    (void)sys_tty_ctrl_c_interrupt(1);
+    lua_sethook(state, interrupt_hook, LUA_MASKCOUNT,
+                LUA_INTERRUPT_INSTRUCTIONS);
+    status = lua_pcall(state, arguments, results, 0);
+    lua_sethook(state, 0, 0, 0);
+    return status;
+}
 
 static void* lua_allocator(void* context, void* pointer, size_t old_size,
                            size_t new_size)
@@ -73,7 +92,7 @@ static int report_lua_error(lua_State* state, int status)
 static int run_loaded_chunk(lua_State* state, int status)
 {
     if (status != LUA_OK) return report_lua_error(state, status);
-    status = lua_pcall(state, 0, LUA_MULTRET, 0);
+    status = protected_call(state, 0, LUA_MULTRET);
     return status == LUA_OK ? 0 : report_lua_error(state, status);
 }
 
@@ -154,7 +173,9 @@ static int run_repl(lua_State* state)
     for (;;) {
         int length;
         sys_puts("> ", 0x0B);
+        (void)sys_tty_ctrl_c_interrupt(0);
         length = read_repl_line(line, sizeof(line));
+        (void)sys_tty_ctrl_c_interrupt(1);
         if (length == -1) return 0;
         if (length == -2) continue;
         if (!length) continue;
@@ -194,7 +215,7 @@ static int run_repl(lua_State* state)
                 length += added;
                 continue;
             }
-            result = lua_pcall(state, 0, LUA_MULTRET, 0);
+            result = protected_call(state, 0, LUA_MULTRET);
             if (result != LUA_OK) {
                 report_lua_error(state, result);
                 break;

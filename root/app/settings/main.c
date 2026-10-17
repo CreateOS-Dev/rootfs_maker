@@ -3,6 +3,14 @@
 
 #define SETTINGS_COUNT 6
 
+static const char* const keyboard_layouts[] = {
+    "fr-azerty-mac.lyt",
+    "us-abc-mac.lyt"
+};
+static const char* const keyboard_labels[] = {
+    "French - AZERTY Mac",
+    "English - ABC Mac"
+};
 static const char* const cursor_themes[] = {
     "classic.srbmp",
     "high-contrast.srbmp",
@@ -65,8 +73,12 @@ static int load_keyboard_setting(int* value)
                              sizeof(text))) {
         return 0;
     }
-    if (strcmp(text, "us.lyt") == 0) *value = 0;
-    else if (strcmp(text, "fr-azerty.lyt") == 0) *value = 1;
+    if (strcmp(text, keyboard_layouts[0]) == 0 ||
+        strcmp(text, "fr-azerty.lyt") == 0)
+        *value = 0;
+    else if (strcmp(text, keyboard_layouts[1]) == 0 ||
+             strcmp(text, "us.lyt") == 0)
+        *value = 1;
     else return 0;
     return 1;
 }
@@ -226,12 +238,15 @@ static int save_value(int setting, int value)
 
     switch (setting) {
     case 0:
-        if (value < 0 || value > 1) return -1;
+        if (value < 0 ||
+            value >= (int)(sizeof(keyboard_layouts) /
+                           sizeof(keyboard_layouts[0])))
+            return -1;
         if (!personal_layout_setting_path(personal_path,
                                           sizeof(personal_path)))
             return -1;
         path = personal_path;
-        data = value ? "fr-azerty.lyt" : "us.lyt";
+        data = keyboard_layouts[value];
         length = strlen(data);
         break;
     case 1:
@@ -292,7 +307,11 @@ static const char* setting_label(int setting)
 static const char* setting_value(int setting, int value)
 {
     switch (setting) {
-    case 0: return value ? "French AZERTY" : "US";
+    case 0:
+        return value >= 0 &&
+               value < (int)(sizeof(keyboard_labels) /
+                             sizeof(keyboard_labels[0]))
+            ? keyboard_labels[value] : "Unavailable";
     case 1: return cursor_themes[value];
     case 2: return cursor_types[value];
     case 3: return value ? "Disabled" : "Enabled";
@@ -311,7 +330,7 @@ static const char* setting_value(int setting, int value)
 static const char* setting_effect(int setting)
 {
     switch (setting) {
-    case 0: return "Effective immediately for this account's active console.";
+    case 0: return "Choose a language and Mac keyboard layout.";
     case 1: return "Effective immediately.";
     case 2: return "Changes the caret style used by the editor and text-entry fields.";
     case 3: return "Controls DHCP autostart on the next system startup.";
@@ -344,12 +363,11 @@ static void draw_settings(const createos_ui_t* ui, int selected,
                           const char* message)
 {
     int visible_selection = 0;
+    static const char* const instructions =
+        "  Up/Down selects; Enter chooses keyboard; Left/Right changes; Q exits.";
     (void)createos_ui_write_centered(ui, 1, "CREATEOS SETTINGS", 0x0B);
-    (void)createos_ui_write_at(
-        ui, 0, 2, "  Use Up/Down to select, Left/Right to change, Q to exit.",
-        0x08);
-    clear_settings_row(ui, 2,
-        (uint32_t)strlen("  Use Up/Down to select, Left/Right to change, Q to exit."));
+    (void)createos_ui_write_at(ui, 0, 2, instructions, 0x08);
+    clear_settings_row(ui, 2, (uint32_t)strlen(instructions));
     for (int i = 0; i < SETTINGS_COUNT; i++) {
         int is_selected;
         int row = 4 + i;
@@ -396,6 +414,59 @@ static void draw_settings(const createos_ui_t* ui, int selected,
     }
 }
 
+static void draw_keyboard_popup(const createos_ui_t* ui, int selected)
+{
+    static const char* const lines[] = {
+        "KEYBOARD LAYOUT",
+        "Choose a language and its Mac keyboard type.",
+        "French",
+        "  AZERTY Mac",
+        "English",
+        "  ABC Mac",
+        "Up/Down: select   Enter: apply   Esc: cancel"
+    };
+    uint32_t width = ui->columns < 64 ? ui->columns : 64;
+    uint32_t left = (ui->columns - width) / 2;
+    uint32_t top = ui->rows > 14 ? (ui->rows - 14) / 2 : 0;
+    char blank[65];
+    memset(blank, ' ', width);
+    blank[width] = 0;
+    for (uint32_t row = 0; row < 9 && top + row < ui->rows; row++) {
+        (void)createos_ui_write_at(ui, left, top + row, blank, 0x70);
+    }
+    (void)createos_ui_write_at(ui, left + 2, top + 1, lines[0], 0x7B);
+    (void)createos_ui_write_at(ui, left + 2, top + 2, lines[1], 0x70);
+    (void)createos_ui_write_at(ui, left + 3, top + 4, lines[2], 0x7F);
+    (void)createos_ui_write_at(ui, left + 4, top + 5, lines[3],
+                               selected == 0 ? 0x7E : 0x70);
+    (void)createos_ui_write_at(ui, left + 3, top + 6, lines[4], 0x7F);
+    (void)createos_ui_write_at(ui, left + 4, top + 7, lines[5],
+                               selected == 1 ? 0x7E : 0x70);
+    (void)createos_ui_write_at(ui, left + 2, top + 9, lines[6], 0x78);
+}
+
+static int choose_keyboard_layout(const createos_ui_t* ui, int selected)
+{
+    for (;;) {
+        draw_keyboard_popup(ui, selected);
+        int key = createos_ui_read_key();
+        if (key == KEY_UP || key == KEY_DOWN) {
+            selected = 1 - selected;
+        } else if (key == '\r' || key == '\n') {
+            return selected;
+        } else if (key == 27 || key == 'q' || key == 'Q' ||
+                   key == KEY_INTERRUPT || key == KEY_CTRL_C) {
+            return -1;
+        } else if (key == KEY_MOUSE_LEFT) {
+            int position = createos_ui_mouse_position();
+            int mouse_y = (int)(((unsigned int)position >> 16) & 0xFFFF);
+            uint32_t top = ui->rows > 14 ? (ui->rows - 14) / 2 : 0;
+            if (mouse_y == (int)top + 5) return 0;
+            if (mouse_y == (int)top + 7) return 1;
+        }
+    }
+}
+
 int main(int argc, char* argv[])
 {
     createos_ui_t ui;
@@ -420,6 +491,7 @@ int main(int argc, char* argv[])
             redraw = 0;
         }
         int key = createos_ui_read_key();
+        int setting = setting_for_selection(loaded, selected);
         if (key == KEY_MOUSE_MOVE || key == KEY_MOUSE_LEFT) {
             int previous_selection = selected;
             const char* previous_message = message;
@@ -437,7 +509,7 @@ int main(int argc, char* argv[])
                 else if (selected != previous_selection)
                     message = 0;
                 if (key == KEY_MOUSE_LEFT)
-                    key = KEY_RIGHT;
+                    key = selected_index == 0 ? '\n' : KEY_RIGHT;
                 else {
                     if (selected != previous_selection ||
                         message != previous_message) {
@@ -455,6 +527,23 @@ int main(int argc, char* argv[])
         }
         if (key == 'q' || key == 'Q' ||
             key == KEY_INTERRUPT || key == KEY_CTRL_C) break;
+        setting = setting_for_selection(loaded, selected);
+        if (setting == 0 && (key == '\r' || key == '\n')) {
+            int next = choose_keyboard_layout(&ui, values[0]);
+            if (next >= 0 && next != values[0]) {
+                if (save_value(0, next) < 0)
+                    message = "Could not save or apply the keyboard layout.";
+                else {
+                    values[0] = next;
+                    loaded[0] = 1;
+                    message = "Keyboard layout saved and applied.";
+                }
+            } else if (next < 0) {
+                message = "Keyboard selection cancelled.";
+            }
+            redraw = 1;
+            continue;
+        }
         if (key == KEY_UP && selected > 0) {
             selected--;
             message = 0;

@@ -2,7 +2,9 @@
 
 static const char* const layouts[] = {
     "us.lyt",
-    "fr-azerty.lyt"
+    "fr-azerty.lyt",
+    "us-abc-mac.lyt",
+    "fr-azerty-mac.lyt"
 };
 
 static int layout_is_supported(const char* name)
@@ -57,7 +59,8 @@ int main(int argc, char* argv[])
         while (count > 0 &&
                (selected[count - 1] == '\n' || selected[count - 1] == '\r'))
             selected[--count] = 0;
-        printf("Selected keyboard: %s\nAvailable: us.lyt, fr-azerty.lyt\n",
+        printf("Selected keyboard: %s\nAvailable: us-abc-mac.lyt, "
+               "fr-azerty-mac.lyt (also us.lyt, fr-azerty.lyt)\n",
                selected);
         return 0;
     }
@@ -108,7 +111,8 @@ int main(int argc, char* argv[])
     }
 
     if (argc != 2 || !layout_is_supported(argv[1])) {
-        sys_puts("Usage: keymap [us.lyt|fr-azerty.lyt]\n"
+        sys_puts("Usage: keymap [us-abc-mac.lyt|fr-azerty-mac.lyt]\n"
+                 "       keymap [us.lyt|fr-azerty.lyt] (legacy layouts)\n"
                  "       keymap create NAME.lyt\n"
                  "       keymap use NAME.lyt\n", 0x0E);
         return 2;

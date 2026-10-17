@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
     char tty[8];
     sys_tty_name(tty);
     sys_clear();
-
+    (void)sys_tty_ctrl_c_interrupt(0);
     while (1) {
         sys_tty_name(tty);
         sys_puts("========================================\n", 0x0B);
@@ -153,7 +153,7 @@ int main(int argc, char* argv[]) {
     }
 
     sys_clear();
-
+    (void)sys_tty_ctrl_c_interrupt(1);
     /* Launch the shell on a clean terminal. */
     char* argv_shell[] = { "/bin/sh", 0 };
     int exec_ret = sys_exec("/bin/sh", argv_shell);

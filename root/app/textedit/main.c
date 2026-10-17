@@ -18,6 +18,7 @@ int snprintf(char* output, size_t capacity, const char* format, ...);
 #define EDITOR_PATH_MAX 256
 #define EDITOR_TREE_MAX_ITEMS 64
 #define EDITOR_TREE_WIDTH 22
+#define TEXTEDIT_CC_PATH "/app/system/bin/tcc.APPL"
 
 typedef struct {
     char data[EDITOR_CAPACITY + 1];
@@ -46,6 +47,7 @@ static uint8_t previous_colors[EDITOR_MAX_ROWS];
 static uint8_t screen_glyph_colors[EDITOR_MAX_ROWS][EDITOR_MAX_COLUMNS];
 static uint8_t previous_glyph_colors[EDITOR_MAX_ROWS][EDITOR_MAX_COLUMNS];
 static int screen_initialized;
+static int editor_graphical_console;
 static size_t editor_screen_rows = 25;
 static size_t editor_screen_columns = 79;
 static size_t editor_visible_lines = 18;
@@ -63,6 +65,8 @@ static int editor_tree_focused;
 static editor_tab_t workspace_tab;
 
 static int has_lua_suffix(const char* path);
+static int suffix_equal(const char* path, const char* suffix);
+static int save_text(editor_state_t* state, const char* path);
 
 static size_t editor_text_offset(void)
 {
@@ -92,11 +96,13 @@ static void editor_detect_screen_size(void)
     char tty_name[16] = { 0 };
     int serial_console = sys_tty_name(tty_name) == 0 &&
                          strncmp(tty_name, "ttyS", 4) == 0;
+    editor_graphical_console = 0;
     if (!serial_console && sys_tty_info(4, &info) == 0 &&
         (info.flags & TTY_FLAG_GRAPHICAL) && info.width >= 80 &&
         info.height >= 25) {
         editor_screen_columns = info.width;
         editor_screen_rows = info.height;
+        editor_graphical_console = 1;
     }
     if (editor_screen_columns >= EDITOR_MAX_COLUMNS)
         editor_screen_columns = EDITOR_MAX_COLUMNS;
@@ -624,7 +630,8 @@ static void draw_line(char* output, const editor_state_t* state,
                       size_t source_positions[EDITOR_MAX_COLUMNS])
 {
     static const char cursor_chars[] = {'|', '_'};
-    const int cursor_visible = ((int)(sys_ticks() / 25u) & 1u);
+    const int cursor_visible = editor_graphical_console &&
+                               ((int)(sys_ticks() / 25u) & 1u);
     memset(output, ' ', editor_screen_columns);
     for (size_t i = 0; i < EDITOR_MAX_COLUMNS; i++)
         source_positions[i] = (size_t)-1;
@@ -737,6 +744,8 @@ static void draw_editor(const editor_state_t* state, const char* path)
     colors[2] = 0x0B;
     format_screen_line(lines[3], !editor_tab_count
         ? "  Ctrl+B Files   Enter Open   Ctrl+O Path   Esc Back"
+        : suffix_equal(path, ".c")
+            ? "  Ctrl+R Build+Run C   Ctrl+B Files   Ctrl+O Path   Ctrl+S Save   Esc Back"
         : has_lua_suffix(path)
             ? "  Ctrl+R Run Lua   Ctrl+B Files   Ctrl+O Path   Ctrl+S Save   Esc Back"
             : "  Ctrl+R N/A   Ctrl+B Files   Ctrl+O Path   Ctrl+S Save   Esc Back");
@@ -990,6 +999,13 @@ static void* textedit_lua_allocator(void* context, void* pointer,
     return replacement;
 }
 
+static void textedit_lua_interrupt_hook(lua_State* state, lua_Debug* debug)
+{
+    (void)debug;
+    if (sys_tty_take_ctrl_c())
+        luaL_error(state, "interrupted");
+}
+
 static int suffix_equal(const char* path, const char* suffix)
 {
     size_t length = strlen(path);
@@ -1049,7 +1065,7 @@ static int project_makefile_path(const char* path, char* makefile,
            "Makefile", sizeof("Makefile"));
     return 0;
 }
-
+__attribute__((unused))
 static int generate_project_makefile(const char* source_path)
 {
     char makefile[EDITOR_PATH_MAX];
@@ -1123,6 +1139,66 @@ static int generate_project_makefile(const char* source_path)
     return 0;
 }
 
+static int c_output_path(const char* source, char* output, size_t capacity)
+{
+    size_t length = strlen(source);
+    if (length < 3 || length - 2 + 1 > capacity)
+        return -1;
+    memcpy(output, source, length - 2);
+    output[length - 2] = 0;
+    if (output[length - 3] == '/')
+        return -1;
+    return 0;
+}
+
+static void print_status_line(const char* label, int status, int color)
+{
+    char text[80];
+    snprintf(text, sizeof(text), "%s (status %d)\n", label, status);
+    sys_puts(text, color);
+}
+
+static void run_c_buffer(editor_tab_t* tab)
+{
+    char output[EDITOR_PATH_MAX];
+    char* compile_argv[] = { TEXTEDIT_CC_PATH, tab->path, "-o", output, 0 };
+    char* run_argv[] = { output, 0 };
+    int result;
+
+    if (c_output_path(tab->path, output, sizeof(output)) < 0) {
+        tab->editor.message = "Cannot derive an output name from this path.";
+        return;
+    }
+    if (tab->editor.dirty) {
+        result = save_text(&tab->editor, tab->path);
+        if (result < 0) {
+            tab->editor.message = "Cannot save the file before compiling.";
+            return;
+        }
+    }
+    sys_clear();
+    sys_puts("TextEdit: compiling with cc\n\n", 0x0B);
+    result = sys_run(TEXTEDIT_CC_PATH, compile_argv);
+    if (result != 0) {
+        print_status_line("\nCompilation failed", result, 0x0C);
+        tab->editor.message = "Compilation failed; see output above.";
+    } else if (sys_chmod(output, 0755) < 0) {
+        sys_puts("\nCannot mark the program executable.\n", 0x0C);
+        tab->editor.message = "Compiled, but the program could not be made executable.";
+    } else {
+        sys_puts("Compiled. Running...\n\n", 0x0A);
+        result = sys_run(output, run_argv);
+        print_status_line("\nProgram exited", result,
+                          result == 0 ? 0x0A : 0x0E);
+        tab->editor.message = result == 0
+            ? "Program finished."
+            : "Program exited with a non-zero status.";
+    }
+    sys_puts("\n[Press any key to return to TextEdit]\n", 0x0E);
+    (void)createos_ui_read_key();
+    screen_initialized = 0;
+}
+
 static void run_current_buffer(editor_tab_t* tab)
 {
     lua_State* state;
@@ -1168,8 +1244,13 @@ static void run_current_buffer(editor_tab_t* tab)
     lua_pop(state, 1);
     result = luaL_loadbufferx(state, tab->editor.data,
                               tab->editor.length, tab->path, 0);
-    if (result == LUA_OK)
+    if (result == LUA_OK) {
+        (void)sys_tty_ctrl_c_interrupt(1);
+        lua_sethook(state, textedit_lua_interrupt_hook, LUA_MASKCOUNT, 10000);
         result = lua_pcall(state, 0, LUA_MULTRET, 0);
+        lua_sethook(state, 0, 0, 0);
+        (void)sys_tty_ctrl_c_interrupt(0);
+    }
     if (result != LUA_OK) {
         message = lua_tostring(state, -1);
         sys_puts("Lua error: ", 0x0C);
@@ -1469,6 +1550,7 @@ int main(int argc, char* argv[])
             } else if (key == 17 || key == KEY_INTERRUPT || key == 27) {
                 if (confirm_quit()) {
                     (void)sys_tty_pointer_mode(0);
+                    (void)sys_tty_ctrl_c_interrupt(1);
                     (void)createos_ui_shutdown();
                     return 0;
                 }
@@ -1579,6 +1661,7 @@ int main(int argc, char* argv[])
         } else if (key == 17 || key == KEY_INTERRUPT || key == 27) {
             if (confirm_quit()) {
                 (void)sys_tty_pointer_mode(0);
+                (void)sys_tty_ctrl_c_interrupt(1);
                 (void)createos_ui_shutdown();
                 return 0;
             }

@@ -112,10 +112,11 @@ static void firstboot_select_settings(firstboot_settings_t* settings)
 
     firstboot_step(2, "Keyboard layout",
                    "The selected layout becomes active immediately.");
-    sys_puts("  1) US\n  2) French AZERTY\n\n", 0x0E);
+    sys_puts("  1) English - ABC Mac\n  2) French - AZERTY Mac\n\n", 0x0E);
     settings->keyboard =
-        firstboot_choose("Keyboard [1-2]: ", "US", "French AZERTY") == 1
-            ? "us.lyt" : "fr-azerty.lyt";
+        firstboot_choose("Keyboard [1-2]: ", "English - ABC Mac",
+                         "French - AZERTY Mac") == 1
+            ? "us-abc-mac.lyt" : "fr-azerty-mac.lyt";
 
     firstboot_step(3, "System region",
                    "Choose the region preference for the system.");

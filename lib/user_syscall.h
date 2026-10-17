@@ -117,6 +117,7 @@
 #define SYS_RUN        124
 #define SYS_UMASK      125
 #define SYS_ACCESS     126
+#define SYS_TTY_TAKE_CTRL_C 127
 
 #define KEY_LEFT        0x90
 #define KEY_RIGHT       0x91
@@ -148,6 +149,7 @@
 #define USER_NAME_MAX  64
 #define TTY_FLAG_ACTIVE    0x01
 #define TTY_FLAG_GRAPHICAL 0x02
+#define TTY_FLAG_FRAMEBUFFER 0x04
 
 /* ============================================================
  * Types
@@ -294,6 +296,7 @@ extern int sys_clipboard_set(const char* data, size_t length);
 extern int sys_clipboard_get(char* data, size_t capacity);
 extern int sys_tty_shell_input(int enabled);
 extern int sys_tty_ctrl_c_interrupt(int enabled);
+extern int sys_tty_take_ctrl_c(void);
 extern int sys_app_return_explorer(int enabled);
 extern int sys_mount(const char* device, const char* mountpoint, fs_type_t type, int flags, void* data);
 extern int sys_unmount(const char* path);

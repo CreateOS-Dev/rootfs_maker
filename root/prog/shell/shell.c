@@ -31,6 +31,7 @@ static int input_visible_start;
 static int input_visible_width;
 static int input_terminal_width = 80;
 static int input_terminal_height = 25;
+static int input_uses_framebuffer;
 static int shell_caret_enabled;
 static char shell_caret_character = '|';
 static int completion_menu_start = -1;
@@ -362,6 +363,7 @@ static void read_line(char* buf, int max) {
     tty_info_t tty_info;
     input_terminal_width = 80;
     input_terminal_height = 25;
+    input_uses_framebuffer = 0;
     for (int i = 0; i < 5; i++) {
         if (sys_tty_info(i, &tty_info) == 0 &&
             strcmp(tty_info.name, tty_name) == 0 &&
@@ -369,6 +371,8 @@ static void read_line(char* buf, int max) {
             input_terminal_width = (int)tty_info.width;
             if (tty_info.height > 0)
                 input_terminal_height = (int)tty_info.height;
+            input_uses_framebuffer =
+                (tty_info.flags & TTY_FLAG_FRAMEBUFFER) != 0;
             break;
         }
     }
@@ -517,13 +521,7 @@ static void read_line(char* buf, int max) {
                 len--;
                 cursor--;
                 buf[len] = 0;
-                if (cursor == len) {
-                    sys_putchar('\b');
-                    sys_putchar(' ');
-                    sys_putchar('\b');
-                } else {
-                    redraw_line(buf, len, cursor, old_len);
-                }
+                redraw_line(buf, len, cursor, old_len);
             }
             continue;
         }
@@ -716,7 +714,7 @@ static void redraw_line(const char* buf, int len, int cursor, int erase_to) {
     }
 
     int caret_column = input_start_x + cursor - input_visible_start;
-    if (shell_caret_enabled &&
+    if (input_uses_framebuffer && shell_caret_enabled &&
         (sys_ticks() / 25u) % 2u == 0 &&
         caret_column < input_terminal_width) {
         if (sys_set_cursor(caret_column, input_start_y) == 0) {
